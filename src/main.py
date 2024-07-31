@@ -74,7 +74,7 @@ def delete_molecule(identifier: str):
     global molecules
     for mol in molecules:
         if mol['identifier'] == identifier:
-            molecules = [mol for mol in molecules if mol['identifier'] != identifier]
+            molecules.remove(mol)
             return {"message": "Molecule deleted successfully", "molecules": molecules}
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Molecule not found")
 
