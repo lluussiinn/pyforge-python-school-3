@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException, status, UploadFile
 from pydantic import BaseModel
 from io import StringIO
 import pandas as pd
+from os import getenv
 
 def substructure_search(mols, mol):
     
@@ -74,7 +75,7 @@ def delete_molecule(identifier: str):
     global molecules
     for mol in molecules:
         if mol['identifier'] == identifier:
-            molecules = [mol for mol in molecules if mol['identifier'] != identifier]
+            molecules.remove(mol)
             return {"message": "Molecule deleted successfully", "molecules": molecules}
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Molecule not found")
 
@@ -115,6 +116,10 @@ def upload_file(file: UploadFile):
    
     molecules.extend(df.to_dict(orient='records'))
     return {"message": "File uploaded successfully", "filename": file.filename, "molecules": molecules}
+
+@app.get("/")
+def get_server():
+    return {"server_id": getenv("SERVER_ID", "1")}
 
 
 
