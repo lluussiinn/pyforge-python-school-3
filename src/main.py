@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException, status, UploadFile
 from pydantic import BaseModel
 from io import StringIO
 import pandas as pd
+from os import getenv
 
 def substructure_search(mols, mol):
     
@@ -115,6 +116,10 @@ def upload_file(file: UploadFile):
    
     molecules.extend(df.to_dict(orient='records'))
     return {"message": "File uploaded successfully", "filename": file.filename, "molecules": molecules}
+
+@app.get("/")
+def get_server():
+    return {"server_id": getenv("SERVER_ID", "1")}
 
 
 
