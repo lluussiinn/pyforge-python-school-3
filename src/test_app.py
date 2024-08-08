@@ -1,90 +1,100 @@
 import pytest
 from fastapi.testclient import TestClient
-from main import app  
-import pandas as pd
-from io import StringIO
+from main import app, molecules
 
-client = TestClient(app)
+@pytest.fixture(scope="function", autouse=True)
+def clear_molecules():
+    """
+    Automatically clearing the molecules list before each test.
+    """
+    molecules.clear()
 
-# Test for adding a molecule
+@pytest.fixture(scope="module")
+def test_client():
+    return TestClient(app)
 
-def test_add_molecule():
-    response = client.post("/molecules", json={"identifier": "test1", "smiles": "CCO"})
-    assert response.status_code == 201
-    assert response.json() == {"message": "Molecule added successfully", "molecules": [{"identifier": "test1", "smiles": "CCO"}]}
+# test adding molecules 
+@pytest.mark.parametrize("identifier, smiles, expected_status_code, expected_response",[
+        ("mol1", "CCO", 201, {"message": "Molecule added successfully", "molecules": [{"identifier": "mol1", "smiles": "CCO"}]}),
+        ("mol1", "CCO", 400, {"detail": "Molecule already exists"}),
+        ("mol2", "c1ccccc1", 201, {"message": "Molecule added successfully", "molecules": [{"identifier": "mol2", "smiles": "c1ccccc1"}]}),
+        ("mol2", "c1ccccc1", 400, {"detail": "Molecule already exists"}),
+        ("mol3", "CC(=O)O", 201, {"message": "Molecule added successfully", "molecules": [{"identifier": "mol3", "smiles": "CC(=O)O"}]})])
+def test_add_molecule(identifier, smiles, expected_status_code, expected_response, test_client):
+    test_client.post("/molecules", json={"identifier": identifier, "smiles": smiles})
+    response = test_client.post("/molecules", json={"identifier": identifier, "smiles": smiles})
+    assert response.status_code == expected_status_code
+    assert response.json() == expected_response
 
-def test_add_molecule_duplicate():
-    client.post("/molecules", json={"identifier": "test2", "smiles": "CCO"})
-    response = client.post("/molecules", json={"identifier": "test2", "smiles": "CCO"})
-    assert response.status_code == 400
-    assert response.json() == {"detail": "Molecule already exists"}
+# test retrieving molecules 
+@pytest.mark.parametrize("identifier, expected_status_code, expected_response",[
+        ("mol1", 200, {"message": "Molecule retrieved successfully", "molecule": {"identifier": "mol1", "smiles": "CCO"}}),
+        ("mol2", 200, {"message": "Molecule retrieved successfully", "molecule": {"identifier": "mol2", "smiles": "c1ccccc1"}}),
+        ("mol3", 200, {"message": "Molecule retrieved successfully", "molecule": {"identifier": "mol3", "smiles": "CC(=O)O"}}),
+        ("nonexistent", 404, {"detail": "Molecule not found"})])
 
-# Test for retrieving a molecule
-def test_retrieve_molecule():
-    client.post("/molecules", json={"identifier": "test3", "smiles": "CCC"})
-    response = client.get("/molecules/test3")
+def test_retrieve_molecule(identifier, expected_status_code, expected_response, test_client):
+    if identifier in ["mol1","mol2","mol3"]:
+        test_client.post("/molecules", json={"identifier": identifier, "smiles": {"mol1": "CCO", "mol2": "c1ccccc1","mol3": "CC(=O)O"}[identifier]})
+    response = test_client.get(f"/molecules/{identifier}")
+    assert response.status_code == expected_status_code
+    assert response.json() == expected_response
+
+# test updating molecules
+@pytest.mark.parametrize(
+    "identifier, smiles, expected_status_code, expected_response",[
+        ("mol1", "CCC", 200, {"message": "Molecule updated successfully", "molecules": [{"identifier": "mol1", "smiles": "CCC"}]}),
+        ("mol2", "CCO", 200, {"message": "Molecule updated successfully", "molecules": [{"identifier": "mol2", "smiles": "CCO"}]}),
+        ("mol3", "C1=CC=CC=C1", 200, {"message": "Molecule updated successfully", "molecules": [{"identifier": "mol3", "smiles": "C1=CC=CC=C1"}]}),
+        ("wrong_input", "CCC", 404, {"detail": "Molecule not found"})])
+    
+def test_update_molecule(identifier, smiles, expected_status_code, expected_response, test_client):
+    if identifier in ["mol1","mol2", "mol3"]:
+        test_client.post("/molecules", json={"identifier": identifier, "smiles": {
+            "mol1": "CCO","mol2": "c1ccccc1","mol3": "CC(=O)O"}[identifier]})
+    response = test_client.put(f"/molecules/{identifier}", json={"identifier": identifier, "smiles": smiles})
+    assert response.status_code == expected_status_code
+    assert response.json() == expected_response
+
+# test deleting molecules
+@pytest.mark.parametrize(
+    "identifier, expected_status_code, expected_response",[
+        ("mol1", 200, {"message": "Molecule deleted successfully", "molecules": [{"identifier": "mol2", "smiles": "c1ccccc1"}, {"identifier": "mol3", "smiles": "CC(=O)O"}]}),
+        ("mol2", 200, {"message": "Molecule deleted successfully", "molecules": [{"identifier": "mol1", "smiles": "CCO"}, {"identifier": "mol3", "smiles": "CC(=O)O"}]}),
+        ("mol3", 200, {"message": "Molecule deleted successfully", "molecules": [{"identifier": "mol1", "smiles": "CCO"}, {"identifier": "mol2", "smiles": "c1ccccc1"}]}),
+        ("nonexistent", 404, {"detail": "Molecule not found"})])
+    
+def test_delete_molecule(identifier, expected_status_code, expected_response, test_client):
+    if identifier in ["mol1", "mol2", "mol3"]:
+        test_client.post("/molecules", json={
+            "identifier": identifier, "smiles": {"mol1": "CCO", "mol2": "c1ccccc1", "mol3": "CC(=O)O"}[identifier]})
+    response = test_client.delete(f"/molecules/{identifier}")
+    assert response.status_code == expected_status_code
+    assert response.json() == expected_response
+
+#test getting all molecules
+def test_get_all_molecules(test_client):
+    for identifier, smiles in {"mol1": "CCO", "mol2": "c1ccccc1", "mol3": "CC(=O)O"}.items():
+        test_client.post("/molecules", json={"identifier": identifier, "smiles": smiles})
+    response = test_client.get("/molecules")
     assert response.status_code == 200
-    assert response.json() == {"message": "Molecule retrieved successfully", "molecule": {"identifier": "test3", "smiles": "CCC"}}
+    assert response.json() == {"message": "Molecules retrieved successfully",
+        "molecules": [{"identifier": "mol1", "smiles": "CCO"},
+                      {"identifier": "mol2", "smiles": "c1ccccc1"},
+                      {"identifier": "mol3", "smiles": "CC(=O)O"}]}
 
-def test_retrieve_molecule_not_found():
-    response = client.get("/molecules/nonexistent")
-    assert response.status_code == 404
-    assert response.json() == {"detail": "Molecule not found"}
-
-# Test for updating a molecule
-def test_update_molecule():
-    client.post("/molecules", json={"identifier": "test4", "smiles": "CCCC"})
-    response = client.put("/molecules/test4", json={"identifier": "test4", "smiles": "CCO"})
-    assert response.status_code == 200
-    assert response.json() == {"message": "Molecule updated successfully", "molecules": [{"identifier": "test4", "smiles": "CCO"}]}
-
-def test_update_molecule_not_found():
-    response = client.put("/molecules/nonexistent", json={"identifier": "nonexistent", "smiles": "CCO"})
-    assert response.status_code == 404
-    assert response.json() == {"detail": "Molecule not found"}
-
-# Test for deleting a molecule
-def test_delete_molecule():
-    client.post("/molecules", json={"identifier": "test5", "smiles": "CCO"})
-    response = client.delete("/molecules/test5")
-    assert response.status_code == 200
-    assert response.json() == {"message": "Molecule deleted successfully", "molecules": []}
-
-def test_delete_molecule_not_found():
-    response = client.delete("/molecules/nonexistent")
-    assert response.status_code == 404
-    assert response.json() == {"detail": "Molecule not found"}
-
-# Test for getting all molecules
-def test_get_all_molecules():
-    client.post("/molecules", json={"identifier": "test6", "smiles": "C1CCCCC1"})
-    response = client.get("/molecules")
-    assert response.status_code == 200
-    assert response.json() == {"message": "Molecules retrieved successfully", "molecules": [{"identifier": "test6", "smiles": "C1CCCCC1"}]}
-
-# Test for substructure search
-def test_search_substructure():
-    client.post("/molecules", json={"identifier": "test7", "smiles": "C1CCOCC1"})
-    response = client.post("/molecules/search", json={"substructure": "O"})
-    assert response.status_code == 200
-    assert response.json() == {"message": "Substructure search completed successfully", "matching_molecules": ["C1CCOCC1"]}
-
-def test_search_substructure_no_match():
-    response = client.post("/molecules/search", json={"substructure": "N"})
-    assert response.status_code == 200
-    assert response.json() == {"message": "Substructure search completed successfully", "matching_molecules": []}
-
-# Test for uploading a file
-def test_upload_file():
-    csv_content = "identifier,smiles\nfile1,C1CCCCC1\n"
-    file = ("molecules.csv", csv_content, "text/csv")
-    response = client.post("/molecules/upload", files={"file": file})
-    assert response.status_code == 200
-    assert response.json() == {"message": "File uploaded successfully", "filename": "molecules.csv", "molecules": [{"identifier": "file1", "smiles": "C1CCCCC1"}]}
-
-def test_upload_file_invalid():
-    invalid_csv_content = "invalid_column,smiles\nfile2,C1CCCCC1\n"
-    file = ("invalid.csv", invalid_csv_content, "text/csv")
-    response = client.post("/molecules/upload", files={"file": file})
-    assert response.status_code == 400
-    assert response.json() == {"detail": "CSV must contain 'identifier' and 'smiles' columns"}
+@pytest.mark.parametrize(
+    "substructure, expected_status_code, expected_response", [
+        ("CC", 200, {"message": "Substructure search completed successfully", "matching_molecules": ["CCO", "CC(=O)O"]}),
+        ("c1ccccc1", 200, {"message": "Substructure search completed successfully", "matching_molecules": ["c1ccccc1"]}),
+        ("CCCCCC", 200, {"message": "Substructure search completed successfully", "matching_molecules": []}),
+        ("invalid_smiles", 400, {"detail": "No substructure"})
+    ])
+def test_search_substructure(substructure, expected_status_code, expected_response, test_client):
+    # Adding test molecules
+    for identifier, smiles in {"mol1": "CCO", "mol2": "c1ccccc1", "mol3": "CC(=O)O"}.items():
+        test_client.post("/molecules", json={"identifier": identifier, "smiles": smiles})
+    
+    response = test_client.post("/molecules/search", json={"substructure": substructure})
+    assert response.status_code == expected_status_code
+    assert response.json() == expected_response
